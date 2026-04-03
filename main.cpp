@@ -116,10 +116,22 @@ int main(int argc, char* argv[])
     // Simplify
     double cumulative_displacement = simplify_polygon(rings, target_vertices);
 
-    // Post-processing: vertex sliding optimization
-    std::cerr << "\nPost-processing..." << std::endl;
-    int relocated = post_process(rings, original_vertices);
-    std::cerr << "Post-processing relocated " << relocated << " vertices" << std::endl;
+    // Post-processing: adaptive based on input size
+    // > 100K vertices: skip (too slow)
+    // > 20K vertices: light pass (fewer iterations)
+    // Otherwise: full pass
+    int relocated = 0;
+    if (total_vertex_count > 100000) {
+        std::cerr << "\nSkipping post-processing (input > 100K vertices)" << std::endl;
+    } else if (total_vertex_count > 20000) {
+        std::cerr << "\nLight post-processing (input > 20K vertices)..." << std::endl;
+        relocated = post_process(rings, original_vertices, 1);
+        std::cerr << "Post-processing relocated " << relocated << " vertices" << std::endl;
+    } else {
+        std::cerr << "\nFull post-processing..." << std::endl;
+        relocated = post_process(rings, original_vertices, 3);
+        std::cerr << "Post-processing relocated " << relocated << " vertices" << std::endl;
+    }
 
     // Compute output area
     double total_output_area = 0.0;
@@ -127,23 +139,32 @@ int main(int argc, char* argv[])
         total_output_area += compute_signed_area(ring);
     }
 
-    // Compute actual symmetric difference per ring
-    double total_sym_diff = 0.0;
-    for (size_t i = 0; i < rings.size(); i++) {
-        std::vector<Pt> simplified_verts = extract_vertices(rings[i]);
-        double ring_sym_diff = compute_symmetric_difference(original_vertices[i], simplified_verts);
-        total_sym_diff += ring_sym_diff;
-        std::cerr << "  Ring " << rings[i].ring_id
-                  << ": symmetric diff = " << ring_sym_diff << std::endl;
+    // Compute displacement
+    double reported_displacement = 0.0;
+    if (total_vertex_count > 100000) {
+        // For very large inputs, skip expensive symmetric diff — use cumulative
+        reported_displacement = cumulative_displacement;
+        std::cerr << "Using cumulative displacement (input > 100K)" << std::endl;
+    } else {
+        // Compute actual symmetric difference per ring
+        double total_sym_diff = 0.0;
+        for (size_t i = 0; i < rings.size(); i++) {
+            std::vector<Pt> simplified_verts = extract_vertices(rings[i]);
+            double ring_sym_diff = compute_symmetric_difference(original_vertices[i], simplified_verts);
+            total_sym_diff += ring_sym_diff;
+            std::cerr << "  Ring " << rings[i].ring_id
+                      << ": symmetric diff = " << ring_sym_diff << std::endl;
+        }
+        reported_displacement = total_sym_diff;
+        std::cerr << "Cumulative displacement: " << cumulative_displacement << std::endl;
+        std::cerr << "Symmetric difference:    " << total_sym_diff << std::endl;
     }
 
     std::cerr << "Input area:  " << total_input_area << std::endl;
     std::cerr << "Output area: " << total_output_area << std::endl;
-    std::cerr << "Cumulative displacement: " << cumulative_displacement << std::endl;
-    std::cerr << "Symmetric difference:    " << total_sym_diff << std::endl;
 
     // Print output with offset added back to coordinates
-    print_output(rings, total_input_area, total_output_area, total_sym_diff, offset_x, offset_y);
+    print_output(rings, total_input_area, total_output_area, reported_displacement, offset_x, offset_y);
 
     return 0;
 }
