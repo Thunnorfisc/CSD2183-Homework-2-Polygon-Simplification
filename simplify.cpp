@@ -3,6 +3,27 @@
 #include "topology.h"
 #include "spatial_index.h"
 #include <iostream>
+#include <unordered_set>
+
+static uint64_t g_serial = 0;
+
+static void push_candidate_from(Node* A, int ring_size, MinHeap& heap)
+{
+    if (!A || A->deleted) return;
+    if (ring_size < 4) return;
+
+    Node* B = A->next;
+    Node* C = B->next;
+    Node* D = C->next;
+
+    if (B->deleted || C->deleted || D->deleted) return;
+
+    CollapseCandidate cand;
+    if (compute_candidate(A, B, C, D, cand)) {
+        cand.serial = g_serial++;
+        heap.push(cand);
+    }
+}
 
 double simplify_polygon(std::vector<Ring>& rings, int target_vertices)
 {
@@ -13,25 +34,23 @@ double simplify_polygon(std::vector<Ring>& rings, int target_vertices)
 
     if (total_vertices <= target_vertices) return 0.0;
 
-    // ── Build spatial grid ──
+    // Build spatial index
     SpatialGrid grid;
     grid.build(rings);
 
-    // ── Build the min-heap with all initial candidates ──
+    // Build the min-heap with all initial candidates
     MinHeap heap;
+    g_serial = 0;
 
     for (auto& ring : rings) {
         if (ring.vertices.size < 4) continue;
 
         Node* start = ring.vertices.head;
-        Node* A = start;
+        Node* cur = start;
         do {
-            Node* B = A->next;
-            Node* C = B->next;
-            Node* D = C->next;
-            heap.push(compute_candidate(A, B, C, D));
-            A = A->next;
-        } while (A != start);
+            push_candidate_from(cur, ring.vertices.size, heap);
+            cur = cur->next;
+        } while (cur != start);
     }
 
     double total_displacement = 0.0;
@@ -51,7 +70,7 @@ double simplify_polygon(std::vector<Ring>& rings, int target_vertices)
         }
         if (!target_ring || target_ring->vertices.size <= 3) continue;
 
-        // ── Topology check using spatial grid ──
+        // Topology check
         if (collapse_causes_intersection(cand.A, cand.ex, cand.ey, cand.D,
                                          cand.B, cand.C, grid)) {
             continue;
@@ -63,53 +82,38 @@ double simplify_polygon(std::vector<Ring>& rings, int target_vertices)
         Node* C = cand.C;
         Node* D = cand.D;
 
-        // Remove old segments from grid: A→B, B→C, C→D
+        // Remove old segments from spatial index
         grid.remove(A, B);
         grid.remove(B, C);
         grid.remove(C, D);
 
-        // Insert E into linked list
+        // Insert E into linked list after A
         Node* E = target_ring->vertices.insert_after(A, cand.ex, cand.ey, cand.ring_id);
 
-        // Remove B and C from linked list
+        // Remove B and C
         target_ring->vertices.remove(B);
         target_ring->vertices.remove(C);
 
-        // Insert new segments into grid: A→E, E→D
+        // Insert new segments into spatial index
         grid.insert(A, E);
         grid.insert(E, D);
-
-        // Update versions
-        A->version++;
-        D->version++;
 
         total_vertices--;
         total_displacement += cand.displacement;
 
-        // ── Generate new candidates ──
-        // After collapse: ...→PP→P→A→E→D→Q→QQ→...
-        // All 6 sequences involving A or D:
-        if (target_ring->vertices.size >= 4) {
-            Node* P = A->prev;
-            Node* Q = D->next;
+        // Update head if it was B or C
+        if (target_ring->vertices.head == B || target_ring->vertices.head == C) {
+            target_ring->vertices.head = E;
+        }
 
-            heap.push(compute_candidate(P, A, E, D));
-            heap.push(compute_candidate(A, E, D, Q));
-
-            if (target_ring->vertices.size >= 5) {
-                Node* PP = P->prev;
-                Node* QQ = Q->next;
-
-                heap.push(compute_candidate(PP, P, A, E));
-                heap.push(compute_candidate(E, D, Q, QQ));
-
-                if (target_ring->vertices.size >= 6) {
-                    Node* PPP = PP->prev;
-                    Node* QQQ = QQ->next;
-
-                    heap.push(compute_candidate(PPP, PP, P, A));
-                    heap.push(compute_candidate(D, Q, QQ, QQQ));
-                }
+        // ── Regenerate candidates ──
+        // Push from 5 starting vertices: A->prev->prev, A->prev, A, E, D
+        // This covers all 4-vertex sequences that could have changed
+        std::unordered_set<Node*> seen;
+        Node* starts[] = {A->prev->prev, A->prev, A, E, D};
+        for (Node* s : starts) {
+            if (s && !s->deleted && seen.insert(s).second) {
+                push_candidate_from(s, target_ring->vertices.size, heap);
             }
         }
     }

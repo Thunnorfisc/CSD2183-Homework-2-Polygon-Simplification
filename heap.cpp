@@ -1,12 +1,21 @@
 #include "heap.h"
 #include <stdexcept>
 #include <utility>
+#include <cmath>
+
+bool MinHeap::higher_priority(const CollapseCandidate& a, const CollapseCandidate& b)
+{
+    double diff = a.displacement - b.displacement;
+    if (diff < -1e-9) return true;   // a is smaller = higher priority
+    if (diff > 1e-9) return false;   // a is larger = lower priority
+    return a.serial < b.serial;       // tie-break: earlier serial wins
+}
 
 void MinHeap::sift_up(int i)
 {
     while (i > 0) {
         int p = parent(i);
-        if (data[i].displacement < data[p].displacement) {
+        if (higher_priority(data[i], data[p])) {
             std::swap(data[i], data[p]);
             i = p;
         } else {
@@ -20,20 +29,20 @@ void MinHeap::sift_down(int i)
     int n = static_cast<int>(data.size());
 
     while (true) {
-        int smallest = i;
+        int best = i;
         int l = left(i);
         int r = right(i);
 
-        if (l < n && data[l].displacement < data[smallest].displacement) {
-            smallest = l;
+        if (l < n && higher_priority(data[l], data[best])) {
+            best = l;
         }
-        if (r < n && data[r].displacement < data[smallest].displacement) {
-            smallest = r;
+        if (r < n && higher_priority(data[r], data[best])) {
+            best = r;
         }
 
-        if (smallest != i) {
-            std::swap(data[i], data[smallest]);
-            i = smallest;
+        if (best != i) {
+            std::swap(data[i], data[best]);
+            i = best;
         } else {
             break;
         }
@@ -46,7 +55,6 @@ void MinHeap::push(const CollapseCandidate& cand)
     sift_up(static_cast<int>(data.size()) - 1);
 }
 
-
 CollapseCandidate MinHeap::pop()
 {
     if (data.empty()) {
@@ -54,8 +62,6 @@ CollapseCandidate MinHeap::pop()
     }
 
     CollapseCandidate result = data[0];
-
-    // Move last element to root and sift down
     data[0] = data.back();
     data.pop_back();
 
