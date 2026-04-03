@@ -17,13 +17,24 @@ static std::vector<Pt> ring_to_vec(const Ring& ring)
     return v;
 }
 
-static bool causes_self_intersection(Node* V, double nx, double ny)
+static double ring_signed_area_from_node(Node* head)
+{
+    double area2 = 0;
+    Node* cur = head;
+    do {
+        Node* nxt = cur->next;
+        area2 += cur->x * nxt->y - nxt->x * cur->y;
+        cur = nxt;
+    } while (cur != head);
+    return area2 / 2.0;
+}
+
+// Check if moving V to (nx,ny) causes intersection with ANY ring
+static bool causes_intersection(Node* V, double nx, double ny,
+                                const std::vector<Ring>& all_rings)
 {
     Node* A = V->prev;
     Node* D = V->next;
-    Node* cur = D->next;
-    if (cur == A) return false;
-    Node* stop = A;
 
     auto segs_cross = [](double p1x, double p1y, double p2x, double p2y,
                          double p3x, double p3y, double p4x, double p4y) -> bool {
@@ -38,16 +49,43 @@ static bool causes_self_intersection(Node* V, double nx, double ny)
                ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
     };
 
-    do {
-        Node* nxt = cur->next;
-        if (cur != A && nxt != A && cur != D && nxt != D) {
-            if (segs_cross(A->x, A->y, nx, ny, cur->x, cur->y, nxt->x, nxt->y))
-                return true;
-            if (segs_cross(nx, ny, D->x, D->y, cur->x, cur->y, nxt->x, nxt->y))
-                return true;
-        }
-        cur = nxt;
-    } while (cur != stop);
+    auto same_pt = [](double ax, double ay, double bx, double by) -> bool {
+        return std::abs(ax - bx) < 1e-12 && std::abs(ay - by) < 1e-12;
+    };
+
+    for (const auto& ring : all_rings) {
+        if (ring.vertices.size < 3) continue;
+
+        Node* cur = ring.vertices.head;
+        do {
+            Node* nxt = cur->next;
+
+            // Skip edges adjacent to V (A→V, V→D)
+            if (cur == A && nxt == V) { cur = nxt; continue; }
+            if (cur == V && nxt == D) { cur = nxt; continue; }
+
+            // Skip edges that share endpoints with new edges
+            bool share_ae = same_pt(cur->x, cur->y, A->x, A->y) ||
+                            same_pt(nxt->x, nxt->y, A->x, A->y) ||
+                            same_pt(cur->x, cur->y, nx, ny) ||
+                            same_pt(nxt->x, nxt->y, nx, ny);
+            bool share_ed = same_pt(cur->x, cur->y, nx, ny) ||
+                            same_pt(nxt->x, nxt->y, nx, ny) ||
+                            same_pt(cur->x, cur->y, D->x, D->y) ||
+                            same_pt(nxt->x, nxt->y, D->x, D->y);
+
+            if (!share_ae) {
+                if (segs_cross(A->x, A->y, nx, ny, cur->x, cur->y, nxt->x, nxt->y))
+                    return true;
+            }
+            if (!share_ed) {
+                if (segs_cross(nx, ny, D->x, D->y, cur->x, cur->y, nxt->x, nxt->y))
+                    return true;
+            }
+
+            cur = nxt;
+        } while (cur != ring.vertices.head);
+    }
 
     return false;
 }
@@ -98,6 +136,9 @@ int post_process(std::vector<Ring>& rings,
                       << col_removed << " collinear vertices" << std::endl;
         }
 
+        // Remember original orientation sign
+        double orig_sign = ring_signed_area_from_node(ring.vertices.head);
+
         double best_sym_diff = compute_symmetric_difference(orig, ring_to_vec(ring));
         std::cerr << "  Ring " << ring.ring_id << ": initial sym diff = " << best_sym_diff << std::endl;
 
@@ -121,23 +162,34 @@ int post_process(std::vector<Ring>& rings,
                 double best_x = orig_x, best_y = orig_y;
                 double best_local = best_sym_diff;
 
-                // Fewer trials for speed: 5 positions instead of 11
                 double trials[] = {-1.0, -0.3, 0.3, 1.0, -0.1, 0.1};
 
                 for (double t : trials) {
                     double nx = orig_x + t * step * dx;
                     double ny = orig_y + t * step * dy;
 
-                    if (causes_self_intersection(V, nx, ny)) continue;
+                    // Check against ALL rings for intersection
+                    if (causes_intersection(V, nx, ny, rings)) continue;
 
+                    // Temporarily move V and check orientation is preserved
                     V->x = nx;
                     V->y = ny;
+
+                    double new_sign = ring_signed_area_from_node(ring.vertices.head);
+                    if ((orig_sign > 0 && new_sign <= 0) || (orig_sign < 0 && new_sign >= 0)) {
+                        // Orientation flipped — reject
+                        V->x = orig_x;
+                        V->y = orig_y;
+                        continue;
+                    }
+
                     double trial_diff = compute_symmetric_difference(orig, ring_to_vec(ring));
                     if (trial_diff < best_local - 1e-6) {
                         best_local = trial_diff;
                         best_x = nx;
                         best_y = ny;
                     }
+
                     V->x = orig_x;
                     V->y = orig_y;
                 }
@@ -158,6 +210,18 @@ int post_process(std::vector<Ring>& rings,
                       << " vertices, sym diff = " << best_sym_diff << std::endl;
 
             if (relocated == 0) break;
+        }
+    }
+
+    // Final orientation verification
+    for (size_t ri = 0; ri < rings.size(); ri++) {
+        Ring& ring = rings[ri];
+        double area = ring_signed_area_from_node(ring.vertices.head);
+        if (ring.ring_id == 0 && area < 0) {
+            std::cerr << "WARNING: Exterior ring has negative area after post-processing!" << std::endl;
+        } else if (ring.ring_id > 0 && area > 0) {
+            std::cerr << "WARNING: Interior ring " << ring.ring_id
+                      << " has positive area after post-processing!" << std::endl;
         }
     }
 
