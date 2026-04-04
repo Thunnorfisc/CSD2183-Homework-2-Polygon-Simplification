@@ -2,9 +2,15 @@
 
 **Course:** CSD2183 Data Structures | **Group:** T3 Group 07 | **AY2025/26 Trimester 2**
 
+## Contributors
+**Members:**
+- William (Implementation)
+- Rui Qin (Report)
+- Kelly   (Slides/Video)
+
 ## About This Project
 
-This project implements an algorithm to simplify polygons with holes while **exactly preserving the signed area** of every ring and **maintaining topological validity** (no self-intersections, no ring crossings, ring count unchanged). The goal is to reduce the number of vertices to a user-specified target while minimizing **areal displacement** — the area of the symmetric difference between the original and simplified polygon.
+This project implements an algorithm to simplify polygons with holes while **exactly preserving the signed area** of every ring and **maintaining topological validity** (no self-intersections, no ring crossings, ring count unchanged). The goal is to reduce the number of vertices to a user-specified target while minimizing **areal displacement**(the area of the symmetric difference between the original and simplified polygon).
 
 The core algorithm is **Area-Preserving Segment Collapse (APSC)** based on Kronenfeld et al. (2020). For every sequence of four consecutive vertices A -> B -> C -> D in a ring, the algorithm computes an area-preserving Steiner point E such that replacing A -> B -> C -> D with A -> E -> D preserves the ring's signed area exactly. The collapse with the smallest areal displacement is greedily selected, topology is verified, and the process repeats until the target vertex count is reached.
 
@@ -38,7 +44,7 @@ Diagnostic/status messages are printed to stderr only.
 
 - **g++** with C++17 support
 - **Linux or macOS** (Windows users: use WSL)
-- No third-party libraries required — the project uses only the C++ standard library.
+- No third-party libraries required
 
 ### Option 1: Build Manually (Terminal)
 
@@ -120,7 +126,7 @@ A `MinHeap` (array-backed binary heap) orders `CollapseCandidate` entries by dis
 
 #### R-Tree — Spatial Index for Intersection Checks
 
-A dynamic R-tree indexes all polygon segments (edges) for efficient spatial queries. This is critical for the topology check — before each collapse, the new edges A->E and E->D must be tested against all nearby segments for intersection.
+A dynamic R-tree indexes all polygon segments (edges) for efficient spatial queries. This is critical for the topology check as before each collapse, the new edges A->E and E->D must be tested against all nearby segments for intersection.
 
 - **Build:** Inserts all segments from all rings — O(V log V).
 - **Insert/Remove:** O(log V) amortized per segment — the tree is updated incrementally after each collapse (3 segments removed, 2 inserted).
